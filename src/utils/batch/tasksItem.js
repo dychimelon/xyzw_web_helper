@@ -1443,117 +1443,70 @@ export function createTasksItem(deps) {
           return;
         }
 
+                // ===== 保铂金版：木质(保留200) → 青铜 → 黄金 → 铂金 逐级贪心 =====
         const boxToOpen = {};
-        let remainingPoints = targetPoints;
 
-        const woodenAvailable = boxInventory[2001] - 200;
-        if (woodenAvailable >= 10) {
-          const woodenPoints = woodenAvailable * 1;
-          const pointsNeeded = Math.min(woodenPoints, remainingPoints);
-          let woodenToOpen = Math.min(pointsNeeded, woodenAvailable);
-          woodenToOpen = Math.floor(woodenToOpen / 10) * 10;
-          if (woodenToOpen === 0 && woodenAvailable >= 10 && pointsNeeded > 0) {
-            woodenToOpen = 10;
-          }
+        // 低阶箱子不足时，是否允许用铂金补一批（默认关闭）
+        const ALLOW_PLATINUM_TOPUP = false;
 
-          if (woodenToOpen >= 10) {
-            boxToOpen[2001] = woodenToOpen;
-            remainingPoints -= woodenToOpen * 1;
+        // per10 = 10 个箱子值多少积分；reserve = 想保留多少个不动
+        const tiers = [
+          { id: 2001, name: "木质宝箱", per10: 10, reserve: 200 },
+          { id: 2002, name: "青铜宝箱", per10: 100, reserve: 0 },
+          { id: 2003, name: "黄金宝箱", per10: 200, reserve: 0 },
+          { id: 2004, name: "铂金宝箱", per10: 500, reserve: 999999 },
+        ];
+
+        let needPoints = targetPoints;
+
+        for (const tier of tiers) {
+          if (needPoints <= 0) break;
+
+          const usableBatches = Math.max(
+            0,
+            Math.floor((boxInventory[tier.id] - tier.reserve) / 10),
+          );
+          if (usableBatches <= 0) continue;
+
+          const useBatches = Math.min(
+            usableBatches,
+            Math.floor(needPoints / tier.per10),
+          );
+
+          if (useBatches > 0) {
+            boxToOpen[tier.id] = useBatches * 10;
+            needPoints -= useBatches * tier.per10;
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${token.name} 计划开 木质宝箱: ${woodenToOpen} 个 (积分: ${woodenToOpen})`,
+              message: `${token.name} 计划开 ${tier.name}: ${useBatches * 10} 个 (积分: ${useBatches * tier.per10})`,
               type: "info",
             });
           }
         }
 
-        if (remainingPoints > 0) {
-          const bronzeAvailable = Math.floor(boxInventory[2002] / 10) * 10;
-          const goldAvailable = Math.floor(boxInventory[2003] / 10) * 10;
-          const platinumAvailable = Math.floor(boxInventory[2004] / 10) * 10;
-          const woodenTotal = Math.floor(boxInventory[2001] / 10) * 10;
-
-          let bestResult = null;
-          let minWaste = Infinity;
-
-          for (let bronze = 0; bronze <= bronzeAvailable; bronze += 10) {
-            const bronzePoints = bronze * 10;
-            if (bronzePoints > remainingPoints) break;
-
-            for (let gold = 0; gold <= goldAvailable; gold += 10) {
-              const goldPoints = gold * 20;
-              if (bronzePoints + goldPoints > remainingPoints) break;
-
-              const afterBronzeGold =
-                remainingPoints - bronzePoints - goldPoints;
-
-              for (
-                let platinum = 0;
-                platinum <= platinumAvailable;
-                platinum += 10
-              ) {
-                const platinumPoints = platinum * 50;
-                if (platinumPoints > afterBronzeGold) break;
-
-                const afterPlatinum = afterBronzeGold - platinumPoints;
-
-                let wooden = 0;
-                if (afterPlatinum > 0) {
-                  wooden = Math.ceil(afterPlatinum / 10) * 10;
-                  if (wooden > woodenTotal || wooden > 100) continue;
-                }
-
-                const totalPoints =
-                  bronzePoints + goldPoints + platinumPoints + wooden;
-                const waste = totalPoints - targetPoints;
-
-                if (waste >= 0 && waste < minWaste) {
-                  minWaste = waste;
-                  bestResult = { bronze, gold, platinum, wooden, totalPoints };
-                  if (waste === 0) break;
-                }
-              }
-              if (minWaste === 0) break;
-            }
-            if (minWaste === 0) break;
-          }
-
-          if (bestResult) {
-            if (bestResult.bronze > 0) {
-              boxToOpen[2002] = bestResult.bronze;
-              addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 计划开 青铜宝箱: ${bestResult.bronze} 个 (积分: ${bestResult.bronze * 10})`,
-                type: "info",
-              });
-            }
-            if (bestResult.gold > 0) {
-              boxToOpen[2003] = bestResult.gold;
-              addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 计划开 黄金宝箱: ${bestResult.gold} 个 (积分: ${bestResult.gold * 20})`,
-                type: "info",
-              });
-            }
-            if (bestResult.platinum > 0) {
-              boxToOpen[2004] = bestResult.platinum;
-              addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 计划开 铂金宝箱: ${bestResult.platinum} 个 (积分: ${bestResult.platinum * 50})`,
-                type: "info",
-              });
-            }
-            if (bestResult.wooden > 0) {
-              boxToOpen[2001] = (boxToOpen[2001] || 0) + bestResult.wooden;
-              addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 计划开 木质宝箱: ${bestResult.wooden} 个 (积分: ${bestResult.wooden})`,
-                type: "info",
-              });
-            }
-            remainingPoints = 0;
-          }
+        while (needPoints > 0 && ALLOW_PLATINUM_TOPUP) {
+          const platinum = tiers[tiers.length - 1];
+          const platinumAvail = Math.floor(boxInventory[platinum.id] / 10) * 10;
+          const platinumUsed = boxToOpen[platinum.id] || 0;
+          if (platinumUsed + 10 > platinumAvail) break;
+          boxToOpen[platinum.id] = platinumUsed + 10;
+          needPoints -= platinum.per10;
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 低阶箱子不足，追加 10 个铂金宝箱补尾数`,
+            type: "warning",
+          });
         }
+
+        if (needPoints > 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 还差 ${needPoints} 积分未凑满（低阶箱子不足，未动用铂金）`,
+            type: "warning",
+          });
+        }
+
+
 
         for (const box of boxPriority) {
           if (shouldStop.value) break;
