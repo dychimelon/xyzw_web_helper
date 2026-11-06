@@ -1,0 +1,16 @@
+# 方案 A：在飞牛上就地构建（推荐）
+# 放到仓库根目录（与 package.json、Dockerfile 同级），再执行：
+#   docker compose up -d --build
+services:
+  xyzw-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NPM_REGISTRY: https://registry.npmmirror.com
+    image: xyzw-web-helper:local
+    container_name: xyzw-web-helper
+    restart: unless-stopped
+    ports:
+      # 左边是飞牛上的端口，被占用就改它（例如 8098）
+      - "8099:80"
