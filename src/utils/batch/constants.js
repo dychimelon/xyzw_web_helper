@@ -66,8 +66,8 @@ export const availableTasks = [
   { label: "一键使用怪异塔道具", value: "batchUseItems" },
   { label: "一键怪异塔合成", value: "batchMergeItems" },
   { label: "一键领取蟠桃园任务", value: "batchClaimPeachTasks" },
-  { label: "一键扫荡灯神", value: "batchGenieSweep" },
-  { label: "一键购买梦境商品", value: "batchBuyDreamItems" },
+  { label: "一键灯神扫荡（免费）", value: "batchGenieSweep" },
+  { label: "付费灯神扫荡（耗券）", value: "batchGenieSweepPaid" },
   { label: "一键玄武赐福", value: "batchXuanwuBlessing" },
 ];
 

@@ -224,11 +224,16 @@ import {
   Settings,
 } from "@vicons/ionicons5";
 import { useMessage } from "naive-ui";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 
 import { useRouter } from "vue-router";
 import ThemeToggle from "@/components/Common/ThemeToggle.vue";
-import { selectedToken, useTokenStore } from "@/stores/tokenStore";
+import {
+  gameTokens,
+  selectedToken,
+  selectedTokenId,
+  useTokenStore,
+} from "@/stores/tokenStore";
 import { isNowInLegionWarTime } from "@/utils/clubBattleUtils";
 
 const tokenStore = useTokenStore();
@@ -237,21 +242,59 @@ const message = useMessage();
 
 const isMobileMenuOpen = ref(false);
 
-const userMenuOptions = [
-  {
-    label: "清除所有Token并退出",
-    key: "logout",
-  },
-];
+// 切换账号后是否跳到控制台（true = 跳，false = 停在当前页）
+const SWITCH_TO_DASHBOARD = true;
+
+const userMenuOptions = computed(() => {
+  const tokens = gameTokens.value || [];
+
+  const tokenItems = tokens.map((t) => ({
+    label: `${t.id === selectedTokenId.value ? "✓ " : ""}${t.name}`,
+    key: `token:${t.id}`,
+  }));
+
+  if (tokenItems.length === 0) {
+    return [{ label: "清除所有Token并退出", key: "logout" }];
+  }
+
+  return [
+    { type: "divider", key: "divider-top" },
+    ...tokenItems,
+    { type: "divider", key: "divider-bottom" },
+    { label: "清除所有Token并退出", key: "logout" },
+  ];
+});
 
 // 方法
 const handleUserAction = async (key) => {
-  switch (key) {
-    case "logout":
-      await tokenStore.clearAllTokens();
-      message.success("已清除所有Token");
-      router.push("/tokens");
-      break;
+  // 退出
+  if (key === "logout") {
+    await tokenStore.clearAllTokens();
+    message.success("已清除所有Token");
+    router.push("/tokens");
+    return;
+  }
+
+  // 切换账号
+  if (typeof key === "string" && key.startsWith("token:")) {
+    const tokenId = key.slice("token:".length);
+
+    if (tokenId === selectedTokenId.value) {
+      return; // 点的是当前账号，什么都不做
+    }
+
+    const token = tokenStore.selectToken(tokenId);
+    if (!token) {
+      message.error("切换失败：找不到这个账号");
+      return;
+    }
+
+    message.success(`已切换到：${token.name}`);
+
+    if (SWITCH_TO_DASHBOARD && !router.currentRoute.value.path.startsWith("/admin")) {
+      router.push("/admin/dashboard");
+    }
+    return;
   }
 };
 </script>

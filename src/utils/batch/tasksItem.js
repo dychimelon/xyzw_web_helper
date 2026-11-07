@@ -754,6 +754,9 @@ export function createTasksItem(deps) {
   /**
    * 一键灯神扫荡
    */
+    /**
+   * 一键灯神扫荡（只用每天每国 1 次免费，不消耗扫荡券）
+   */
   const batchGenieSweep = async () => {
     if (selectedTokens.value.length === 0) return;
 
@@ -764,157 +767,82 @@ export function createTasksItem(deps) {
       tokenStatus.value[id] = "waiting";
     });
 
+    const genieNames = { 1: "魏国", 2: "蜀国", 3: "吴国", 4: "群雄", 5: "深海" };
+
     const taskPromises = selectedTokens.value.map(async (tokenId) => {
       if (shouldStop.value) return;
 
       tokenStatus.value[tokenId] = "running";
       const token = tokens.value.find((t) => t.id === tokenId);
 
-      try {
+      const log = (msg, type = "info") =>
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== 开始灯神扫荡: ${token.name} ===`,
-          type: "info",
+          message: `${token?.name || tokenId} ${msg}`,
+          type,
         });
+
+      try {
+        log("=== 开始灯神免费扫荡 ===");
 
         await ensureConnection(tokenId);
 
-        // 获取最新角色信息
         const roleInfoRes = await tokenStore.sendMessageWithPromise(
           tokenId,
           "role_getroleinfo",
           {},
           5000,
         );
-
-        // 解析灯神进度和扫荡券
         const role = roleInfoRes?.role || roleInfoRes?.data?.role || {};
-        const genieData = role.genie || {};
-        // 扫荡券 ID 1021
-        const sweepTicketCount = role.items?.[1021]?.quantity || 0;
+        const dailyTime = role.dailyTask?.dailyTime || 0;
+        const statisticsTime = role.statisticsTime || {};
 
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${token.name} 当前扫荡券数量: ${sweepTicketCount}`,
-          type: "info",
-        });
-
-        if (sweepTicketCount <= 0) {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 扫荡券不足，停止扫荡`,
-            type: "warning",
-          });
-          tokenStatus.value[tokenId] = "completed";
-          return;
-        }
-
-        // 计算最高层数
-        // 1-4: 魏蜀吴群 (0-16 -> 1-17层)
-        // 5: 深海 (0-9 -> 1-10层)
-        let maxLayer = -1;
-        let bestGenieId = -1;
-
-        // 检查魏蜀吴群 (1-4)
-        for (let i = 1; i <= 4; i++) {
-          if (genieData[i] !== undefined) {
-            // 数据值 0 代表 1 层? 用户说 0-16 代表 1-17 层
-            // 假设 genieData[i] 是已通过的层数索引
-            const currentLayer = genieData[i] + 1;
-            if (currentLayer > maxLayer) {
-              maxLayer = currentLayer;
-              bestGenieId = i;
-            }
-          }
-        }
-
-        if (bestGenieId === -1) {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 未找到可扫荡的灯神关卡`,
-            type: "warning",
-          });
-          tokenStatus.value[tokenId] = "completed";
-          return;
-        }
-
-        const genieNames = {
-          1: "魏国",
-          2: "蜀国",
-          3: "吴国",
-          4: "群雄",
-          5: "深海",
+        // 记录时间戳 < 当日 dailyTime → 今天还没用过免费次数
+        const isFreeAvailable = (gid) => {
+          const stamp = statisticsTime[`genie:daily:free:${gid}`];
+          return !Number.isFinite(stamp) || stamp < dailyTime;
         };
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${token.name} 扫荡: ${genieNames[bestGenieId]}灯神 (第${maxLayer}层)`,
-          type: "info",
-        });
 
-        // 开始扫荡
-        let remainingTickets = sweepTicketCount;
+        let successCount = 0;
+        let skippedCount = 0;
 
-        while (remainingTickets > 0 && !shouldStop.value) {
-          const sweepCnt = Math.min(remainingTickets, 20);
+        for (let gid = 1; gid <= 4; gid++) {
+          if (shouldStop.value) break;
+
+          if (!isFreeAvailable(gid)) {
+            skippedCount++;
+            log(`${genieNames[gid]}灯神 今日免费次数已用，跳过`);
+            continue;
+          }
 
           try {
             const res = await tokenStore.sendMessageWithPromise(
               tokenId,
               "genie_sweep",
-              {
-                genieId: bestGenieId,
-                sweepCnt,
-              },
+              { genieId: gid },
               5000,
             );
-
-            const ok = res && (res.role || res.role.items);
-
+            const ok = res && (res.role || res.role?.items);
             if (ok) {
-              addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 扫荡成功 ${sweepCnt} 次`,
-                type: "success",
-              });
-              remainingTickets = res.role.items?.[1021]?.quantity || 0;
+              successCount++;
+              log(`${genieNames[gid]}灯神 免费扫荡成功`, "success");
             } else {
-              addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 扫荡失败: ${res.hint || "未知错误"}`,
-                type: "error",
-              });
-              break; // 失败则停止
+              log(`${genieNames[gid]}灯神 扫荡失败: ${res?.hint || "未知错误"}`, "error");
             }
           } catch (err) {
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} 扫荡请求异常: ${err.message}`,
-              type: "error",
-            });
-            break;
+            log(`${genieNames[gid]}灯神 扫荡异常: ${err.message}`, "error");
           }
 
-          if (remainingTickets > 0) {
-            await new Promise((r) => setTimeout(r, delayConfig.action));
-          }
+          await new Promise((r) => setTimeout(r, delayConfig.action));
         }
 
-        // 刷新信息
+        log(`本次免费扫荡结束：成功 ${successCount} 次，跳过 ${skippedCount} 个`, "success");
         await tokenStore.sendMessage(tokenId, "role_getroleinfo");
         tokenStatus.value[tokenId] = "completed";
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${token.name} === 灯神扫荡完成 ===`,
-          type: "success",
-        });
       } catch (error) {
         console.error(error);
         tokenStatus.value[tokenId] = "failed";
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `灯神扫荡失败: ${error.message}`,
-          type: "error",
-        });
+        log(`灯神免费扫荡失败: ${error.message}`, "error");
       } finally {
         tokenStore.closeWebSocketConnection(tokenId);
         releaseConnectionSlot();
@@ -925,9 +853,135 @@ export function createTasksItem(deps) {
 
     isRunning.value = false;
     currentRunningTokenId.value = null;
-    message.success("一键灯神扫荡结束");
+    message.success("一键灯神扫荡（免费）结束");
   };
 
+    /**
+   * 付费灯神扫荡：消耗扫荡券，扫「魏蜀吴群」中已通关层数最高的那个灯神
+   */
+  const batchGenieSweepPaid = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const genieNames = {
+      1: "魏国",
+      2: "蜀国",
+      3: "吴国",
+      4: "群雄",
+      5: "深海",
+    };
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((t) => t.id === tokenId);
+
+      const log = (msg, type = "info") =>
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token?.name || tokenId} ${msg}`,
+          type,
+        });
+
+      try {
+        log("=== 开始付费灯神扫荡（消耗扫荡券）===");
+
+        await ensureConnection(tokenId);
+
+        const roleInfoRes = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "role_getroleinfo",
+          {},
+          5000,
+        );
+        const role = roleInfoRes?.role || roleInfoRes?.data?.role || {};
+        const genieData = role.genie || {};
+        const ticketCount = role.items?.[1021]?.quantity || 0;
+
+        log(`当前扫荡券: ${ticketCount}`);
+
+        if (ticketCount <= 0) {
+          log("扫荡券不足，跳过", "warning");
+          tokenStatus.value[tokenId] = "completed";
+          return;
+        }
+
+        let maxLayer = -1;
+        let bestGenieId = -1;
+
+        for (let i = 1; i <= 4; i++) {
+          if (genieData[i] !== undefined) {
+            const currentLayer = genieData[i] + 1;
+            if (currentLayer > maxLayer) {
+              maxLayer = currentLayer;
+              bestGenieId = i;
+            }
+          }
+        }
+
+        if (bestGenieId === -1) {
+          log("未找到可扫荡的灯神关卡", "warning");
+          tokenStatus.value[tokenId] = "completed";
+          return;
+        }
+
+        log(`扫荡目标: ${genieNames[bestGenieId]}灯神 (记录第${maxLayer}层)`);
+
+        let remaining = ticketCount;
+        let total = 0;
+
+        while (remaining > 0 && !shouldStop.value) {
+          const sweepCnt = Math.min(remaining, 20);
+
+          const res = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "genie_sweep",
+            { genieId: bestGenieId, sweepCnt },
+            5000,
+          );
+
+          const ok = res && (res.role || res.role?.items);
+          if (!ok) {
+            log(`扫荡失败: ${res?.hint || "未知错误"}`, "error");
+            break;
+          }
+
+          total += sweepCnt;
+          remaining = res.role.items?.[1021]?.quantity || 0;
+          log(`扫荡成功 ${sweepCnt} 次，剩余券 ${remaining}`, "success");
+
+          if (remaining > 0) {
+            await new Promise((r) => setTimeout(r, delayConfig.action));
+          }
+        }
+
+        log(`付费扫荡结束，共扫 ${total} 次`);
+        await tokenStore.sendMessage(tokenId, "role_getroleinfo");
+        tokenStatus.value[tokenId] = "completed";
+      } catch (error) {
+        console.error(error);
+        tokenStatus.value[tokenId] = "failed";
+        log(`付费灯神扫荡失败: ${error.message}`, "error");
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("付费灯神扫荡结束");
+  };
+  
   const batchOpenBox = async (isScheduledTask = false) => {
     if (selectedTokens.value.length === 0) return;
 
@@ -1597,6 +1651,7 @@ export function createTasksItem(deps) {
     batchClaimStarRewards,
     batchClaimPeachTasks,
     batchGenieSweep,
+	batchGenieSweepPaid,
     batchRedeemCodes,
   };
 }
