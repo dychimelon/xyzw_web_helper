@@ -735,7 +735,7 @@
               </div>
               <div class="log-header-controls">
                 <n-checkbox v-model:checked="autoScrollLog" size="small">
-                  自动滚动
+                  自动定位最新
                 </n-checkbox>
                 <n-checkbox v-model:checked="filterErrorsOnly" size="small">
                   只看错误
@@ -756,7 +756,7 @@
           />
           <div class="log-container" ref="logContainer">
             <div
-              v-for="(log, logIndex) in filteredLogs"
+              v-for="(log, logIndex) in displayLogs"
               :key="logIndex"
               class="log-item"
               :class="log.type"
@@ -5659,6 +5659,9 @@ const filteredLogs = computed(() => {
   return logs.value;
 });
 
+// 倒序显示：最新日志在上面（手机上不用往下滑就能看到最新）
+const displayLogs = computed(() => [...filteredLogs.value].reverse());
+
 const currentRunningTokenName = computed(() => {
   const t = tokens.value.find((x) => x.id === currentRunningTokenId.value);
   return t ? t.name : "";
@@ -5883,7 +5886,7 @@ const addLog = (log) => {
   try {
     if (logContainer.value && autoScrollLog.value) {
       // 直接尝试滚动，不使用nextTick
-      logContainer.value.scrollTop = logContainer.value.scrollHeight;
+      logContainer.value.scrollTop = 0;
     }
   } catch (error) {
     // 忽略DOM操作错误，确保日志数据仍然被记录
@@ -5894,7 +5897,7 @@ const addLog = (log) => {
   nextTick(() => {
     try {
       if (logContainer.value && autoScrollLog.value) {
-        logContainer.value.scrollTop = logContainer.value.scrollHeight;
+        logContainer.value.scrollTop = 0;
       }
     } catch (error) {
       // 忽略错误
@@ -5906,7 +5909,7 @@ watch(autoScrollLog, (newValue) => {
   if (newValue && logContainer.value) {
     nextTick(() => {
       try {
-        logContainer.value.scrollTop = logContainer.value.scrollHeight;
+        logContainer.value.scrollTop = 0;
       } catch (error) {
         // 忽略DOM操作错误
         console.warn("Failed to scroll log container:", error);
