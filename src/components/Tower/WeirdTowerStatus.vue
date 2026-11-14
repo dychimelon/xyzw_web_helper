@@ -721,13 +721,13 @@ const startTowerClimb = async () => {
   let climbCount = 0;
   const maxClimb = normalizeWeirdTowerMaxClimb(maxClimbInput.value);
   maxClimbInput.value = maxClimb;
-  // 设置超时保护，60秒后自动重置状态
+  // 设置超时保护：按爬塔次数放宽（每轮约 2.5 秒 + 领奖开销），至少 60 秒
   climbTimeout.value = setTimeout(() => {
     isClimbing.value = false;
     climbTimeout.value = null;
     stopFlag = true;
     message.info("批量爬塔已超时自动停止");
-  }, 60000);
+  }, Math.max(60000, maxClimb * 4000));
 
   try {
     const tokenId = tokenStore.selectedToken.id;
@@ -805,7 +805,10 @@ const startTowerClimb = async () => {
       //   会重复发送领奖命令，且无法感知历史未领取的章节）
       await claimPendingChapterRewards(tokenId);
 
-      await new Promise((res) => setTimeout(res, 400)); // 每次间隔400毫秒
+      // 每轮间隔 1.5~2.5 秒（原来 0.4 秒太快，游戏里会报错/异常）
+      await new Promise((res) =>
+        setTimeout(res, 1500 + Math.floor(Math.random() * 1000)),
+      );
     }
     // 获取免费道具数量
     const freeEnergyResult = await tokenStore.sendMessageWithPromise(

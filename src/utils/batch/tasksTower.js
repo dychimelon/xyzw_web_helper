@@ -460,6 +460,11 @@ export function createTasksTower(deps) {
 
         while (currentEnergy > 0 && count < MAX_CLIMB && !shouldStop.value) {
           try {
+            // 控制爬塔节奏：每轮随机等待 1.5~2.5 秒，避免请求太密导致游戏内报错/异常
+            await new Promise((r) =>
+              setTimeout(r, 1500 + Math.floor(Math.random() * 1000)),
+            );
+
             await tokenStore.sendMessageWithPromise(
               tokenId,
               "evotower_readyfight",
