@@ -733,18 +733,21 @@ const startTowerClimb = async () => {
   let climbCount = 0;
   const maxClimb = normalizeWeirdTowerMaxClimb(maxClimbInput.value);
   maxClimbInput.value = maxClimb;
-  // 设置超时保护：按爬塔次数放宽（每轮约 2.5 秒 + 领奖开销），至少 60 秒
+  // 设置超时保护：按爬塔次数放宽（每轮约 5 秒 + 领奖开销），至少 2 分钟
   climbTimeout.value = setTimeout(() => {
     isClimbing.value = false;
     climbTimeout.value = null;
     stopFlag = true;
     message.info("批量爬塔已超时自动停止");
-  }, Math.max(60000, maxClimb * 4000));
+  }, Math.max(120000, maxClimb * 8000));
 
   try {
     const tokenId = tokenStore.selectedToken.id;
     // 爬塔前先补领未领取的章节奖励，否则 evotower_readyfight 会被拒绝（12200020）
     await claimPendingChapterRewards(tokenId);
+
+    // 限流（400340）后只重试一次，避免越撞越久
+    let rateLimitRetried = false;
 
     for (let i = 0; i < maxClimb; i++) {
       if (stopFlag) break;
@@ -754,24 +757,40 @@ const startTowerClimb = async () => {
       const currentEnergy = towerEnergy.value;
       if (currentEnergy <= 0) break;
 
-      // 准备战斗
-      await tokenStore.sendMessageWithPromise(
-        tokenId,
-        "evotower_readyfight",
-        {},
-        5000,
-      );
+      try {
+        // 准备战斗
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "evotower_readyfight",
+          {},
+          5000,
+        );
 
-      // 执行战斗
-      await tokenStore.sendMessageWithPromise(
-        tokenId,
-        "evotower_fight",
-        {
-          battleNum: 1,
-          winNum: 1,
-        },
-        10000,
-      );
+        // 执行战斗
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "evotower_fight",
+          {
+            battleNum: 1,
+            winNum: 1,
+          },
+          10000,
+        );
+      } catch (err) {
+        const errMsg = err?.message || "";
+        // 400340 = 服务器限流/风控：猛撞只会加重处罚，长冷却后只重试一次
+        if (errMsg.includes("400340")) {
+          if (rateLimitRetried) {
+            message.error("仍在限流中，已停止爬塔，请过几小时再试");
+            break;
+          }
+          rateLimitRetried = true;
+          message.warning("被服务器限流（操作过快），暂停 60 秒后重试一次…");
+          await new Promise((r) => setTimeout(r, 60000));
+          continue;
+        }
+        throw err;
+      }
 
       climbCount++;
       message.success(`第${climbCount}次爬塔命令已发送`);
@@ -817,9 +836,9 @@ const startTowerClimb = async () => {
       //   会重复发送领奖命令，且无法感知历史未领取的章节）
       await claimPendingChapterRewards(tokenId);
 
-      // 每轮间隔 1.5~2.5 秒（原来 0.4 秒太快，游戏里会报错/异常）
+      // 每轮间隔 4~6 秒，接近真人操作，降低被服务器限流的风险
       await new Promise((res) =>
-        setTimeout(res, 1500 + Math.floor(Math.random() * 1000)),
+        setTimeout(res, 4000 + Math.floor(Math.random() * 2000)),
       );
     }
     // 获取免费道具数量

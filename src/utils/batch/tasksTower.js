@@ -451,6 +451,8 @@ export function createTasksTower(deps) {
           weirdTowerMaxClimb?.value ?? weirdTowerMaxClimb,
         );
         let consecutiveFailures = 0;
+        // 限流（400340）后只重试一次，避免越撞越久
+        let rateLimitRetried = false;
 
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -460,9 +462,9 @@ export function createTasksTower(deps) {
 
         while (currentEnergy > 0 && count < MAX_CLIMB && !shouldStop.value) {
           try {
-            // 控制爬塔节奏：每轮随机等待 1.5~2.5 秒，避免请求太密导致游戏内报错/异常
+            // 控制爬塔节奏：每轮随机等待 4~6 秒，接近真人操作，降低被服务器限流的风险
             await new Promise((r) =>
-              setTimeout(r, 1500 + Math.floor(Math.random() * 1000)),
+              setTimeout(r, 4000 + Math.floor(Math.random() * 2000)),
             );
 
             await tokenStore.sendMessageWithPromise(
@@ -566,10 +568,32 @@ export function createTasksTower(deps) {
               // 忽略刷新失败
             }
           } catch (err) {
+            const errMsg = err?.message || "未知错误";
+
+            // 400340 = 服务器限流/风控：猛撞只会加重处罚，长冷却后只重试一次
+            if (errMsg.includes("400340")) {
+              if (rateLimitRetried) {
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} 仍在限流中，本账号停止爬塔（请过几小时再试）`,
+                  type: "error",
+                });
+                break;
+              }
+              rateLimitRetried = true;
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} 被服务器限流（操作过快），暂停 60 秒后重试一次…`,
+                type: "warning",
+              });
+              await new Promise((r) => setTimeout(r, 60000));
+              continue;
+            }
+
             consecutiveFailures++;
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `战斗出错: ${err.message} (重试 ${consecutiveFailures}/3)`,
+              message: `战斗出错: ${errMsg} (重试 ${consecutiveFailures}/3)`,
               type: "warning",
             });
 
@@ -582,7 +606,7 @@ export function createTasksTower(deps) {
               break;
             }
 
-            await new Promise((r) => setTimeout(r, 1000));
+            await new Promise((r) => setTimeout(r, 3000));
 
             try {
               const evotowerinfoRefresh2 =
