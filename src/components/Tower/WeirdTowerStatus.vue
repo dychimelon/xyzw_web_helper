@@ -467,6 +467,8 @@ const startUseItems = async () => {
       `开始使用道具，剩余：${lotteryLeftCnt}，已用：${costTotalCnt}`,
     );
     let processedCount = 0;
+    // 棋盘满了服务器会拒绝（12300040 没有空格子了），记录下来但不当成任务失败
+    let boardFullReason = "";
 
     // eslint-disable-next-line no-unmodified-loop-condition -- The Stop button changes this flag while awaited requests yield.
     while (lotteryLeftCnt > 0 && !stopItemFlag) {
@@ -480,15 +482,20 @@ const startUseItems = async () => {
       }
 
       // 2. 使用道具
-      await tokenStore.sendMessageWithPromise(
-        tokenId,
-        "mergebox_openbox",
-        {
-          actType: 1,
-          pos,
-        },
-        5000,
-      );
+      try {
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "mergebox_openbox",
+          {
+            actType: 1,
+            pos,
+          },
+          5000,
+        );
+      } catch (err) {
+        boardFullReason = err?.message || "未知错误";
+        break;
+      }
 
       costTotalCnt++;
       lotteryLeftCnt--;
@@ -497,7 +504,7 @@ const startUseItems = async () => {
       await new Promise((res) => setTimeout(res, 500));
     }
 
-    // 领取累计奖励
+    // 领取累计奖励（棋盘满了被中断也照领，避免漏奖励）
     await tokenStore
       .sendMessageWithPromise(
         tokenId,
@@ -507,6 +514,11 @@ const startUseItems = async () => {
       )
       .catch(() => {});
 
+    if (boardFullReason) {
+      message.warning(
+        `棋盘已满（${boardFullReason}），本次用了 ${processedCount} 个，还剩 ${lotteryLeftCnt} 个，请先合成腾格子再继续`,
+      );
+    }
     message.success(`已使用道具 ${processedCount} 次`);
     // 刷新一下
     await getTowerInfo();

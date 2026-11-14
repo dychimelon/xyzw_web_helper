@@ -1095,6 +1095,8 @@ export function createTasksTower(deps) {
         });
 
         let processedCount = 0;
+        // 棋盘满了服务器会拒绝（12300040 没有空格子了），记录下来但不当成任务失败
+        let boardFullReason = "";
 
         while (lotteryLeftCnt > 0 && !shouldStop.value) {
           let pos = {};
@@ -1107,15 +1109,20 @@ export function createTasksTower(deps) {
           }
 
           // 2. 使用道具
-          await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "mergebox_openbox",
-            {
-              actType: 1,
-              pos,
-            },
-            5000,
-          );
+          try {
+            await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "mergebox_openbox",
+              {
+                actType: 1,
+                pos,
+              },
+              5000,
+            );
+          } catch (err) {
+            boardFullReason = err?.message || "未知错误";
+            break;
+          }
 
           costTotalCnt++;
           lotteryLeftCnt--;
@@ -1138,6 +1145,14 @@ export function createTasksTower(deps) {
           message: `${token.name} 尝试领取累计使用奖励`,
           type: "info",
         });
+
+        if (boardFullReason) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 棋盘已满（服务器提示：${boardFullReason}），本次用了 ${processedCount} 个，还剩 ${lotteryLeftCnt} 个。请先点「一键怪异塔合成」腾出格子，再点「一键使用道具」继续。`,
+            type: "warning",
+          });
+        }
 
         tokenStatus.value[tokenId] = "completed";
         addLog({
