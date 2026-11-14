@@ -403,7 +403,14 @@
                   @click="batchGenieSweep"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
-                  一键灯神扫荡
+                  一键灯神扫荡（免费）
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchGenieSweepPaid"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  付费灯神扫荡（耗券）
                 </n-button>
                 <n-popselect
                   :value="campChallengeMode"
@@ -3783,6 +3790,7 @@ const taskGroupDefinitions = [
       "store_purchase",
       "collection_claimfreereward",
       "batchGenieSweep",
+      "batchGenieSweepPaid",
       "batchXuanwuBlessing",
     ],
   },
@@ -4720,6 +4728,7 @@ function getScheduledTask(taskName) {
     batchMergeItems,
     batchClaimPeachTasks,
     batchGenieSweep,
+    batchGenieSweepPaid,
     batchBuyDreamItems,
     batchXuanwuBlessing,
   };
@@ -6169,6 +6178,7 @@ const {
   batchClaimStarRewards,
   batchClaimPeachTasks,
   batchGenieSweep,
+  batchGenieSweepPaid,
 } = tasksItem;
 
 const tasksDungeon = createTasksDungeon(createTaskDeps());
