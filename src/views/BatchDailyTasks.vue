@@ -3191,20 +3191,38 @@ const getSortIcon = (field) => {
 };
 
 const tokens = computed(() => tokenStore.gameTokens);
+// 响应式时钟：活动开放判断必须依赖它。
+// 只读 new Date() 的 computed 没有任何响应式依赖，Vue 会把第一次算出的值永久缓存：
+// 页面在 22 点后（或 6 点前）打开 → 竞技场一整天都被当成"未开放"，按钮变灰、定时任务被跳过。
+const clockNow = ref(new Date());
+let clockTimer = null;
+onMounted(() => {
+  if (clockTimer) clearInterval(clockTimer);
+  clockTimer = setInterval(() => {
+    clockNow.value = new Date();
+  }, 20000);
+});
+onBeforeUnmount(() => {
+  if (clockTimer) {
+    clearInterval(clockTimer);
+    clockTimer = null;
+  }
+});
+
 const ismengjingActivityOpen = computed(() => {
-  const day = new Date().getDay();
+  const day = clockNow.value.getDay();
   return day === 0 || day === 1 || day === 3 || day === 4;
 });
 const isbaokuActivityOpen = computed(() => {
-  const day = new Date().getDay();
+  const day = clockNow.value.getDay();
   return !isSameGameValue(day, 1) && !isSameGameValue(day, 2);
 });
 const isarenaActivityOpen = computed(() => {
-  const hour = new Date().getHours();
+  const hour = clockNow.value.getHours();
   return hour >= 6 && hour < 22;
 });
 const getCurrentActivityWeek = computed(() => {
-  const now = new Date();
+  const now = clockNow.value;
   const start = new Date("2025-12-12T12:00:00"); // 起始时间：黑市周开始
   const weekDuration = 7 * 24 * 60 * 60 * 1000; // 一周毫秒数
   const cycleDuration = 3 * weekDuration; // 三周期毫秒数
@@ -3226,7 +3244,7 @@ const getCurrentActivityWeek = computed(() => {
 const isWeirdTowerActivityOpen = computed(() => {
   if (getCurrentActivityWeek.value !== "黑市周") return false;
 
-  const now = new Date();
+  const now = clockNow.value;
   const day = now.getDay();
   const hour = now.getHours();
   // 如果是周五，必须在12点之后
@@ -3238,7 +3256,7 @@ const isWeirdTowerActivityOpen = computed(() => {
 
 // 获取本月第四个周日的日期
 const getFourthSundayOfMonth = () => {
-  const now = new Date();
+  const now = clockNow.value;
   const year = now.getFullYear();
   const month = now.getMonth();
 
@@ -3259,7 +3277,7 @@ const getFourthSundayOfMonth = () => {
 };
 
 const isWarGuessActivityOpen = computed(() => {
-  const now = new Date();
+  const now = clockNow.value;
 
   // 手动修正：2026年3月1日开放
   if (
@@ -4548,22 +4566,32 @@ const startScheduler = () => {
         return;
       }
 
+      // 上一分钟：浏览器会把后台页面的定时器节流到 1 次/分钟，容易刚好跨过整分钟，这里补一次
+      const prevMinute = new Date(now.getTime() - 60 * 1000);
+
       tasksToRun.forEach((task) => {
-        let shouldRun = false;
+        /** 命中的计划时间（可能落在上一分钟），null 表示这一分钟不执行 */
+        let matchedAt = null;
 
         if (task.runType === "daily") {
           // Check if current time matches the scheduled time
           const taskTime = task.runTime;
-          const nowTime = now.toLocaleTimeString("zh-CN", {
-            hour12: false,
-            hour: "2-digit",
-            minute: "2-digit",
-          });
-          shouldRun = nowTime === taskTime;
+          const timeOf = (d) =>
+            d.toLocaleTimeString("zh-CN", {
+              hour12: false,
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+          if (timeOf(now) === taskTime) matchedAt = now;
+          else if (timeOf(prevMinute) === taskTime) matchedAt = prevMinute;
         } else if (task.runType === "cron") {
           // Improved cron expression parsing using shared utility
           try {
-            shouldRun = matchesCronExpression(task.cronExpression, now);
+            if (matchesCronExpression(task.cronExpression, now)) {
+              matchedAt = now;
+            } else if (matchesCronExpression(task.cronExpression, prevMinute)) {
+              matchedAt = prevMinute;
+            }
           } catch (error) {
             console.error(
               `[${new Date().toISOString()}] Error parsing cron expression ${task.cronExpression}:`,
@@ -4578,9 +4606,9 @@ const startScheduler = () => {
           }
         }
 
-        if (shouldRun) {
+        if (matchedAt) {
           // Check if the task was already executed in the last minute to avoid duplicate execution
-          const taskExecutionKey = `${task.id}_${now.getDate()}_${now.getHours()}_${now.getMinutes()}`;
+          const taskExecutionKey = `${task.id}_${matchedAt.getDate()}_${matchedAt.getHours()}_${matchedAt.getMinutes()}`;
           const lastExecutionKey = localStorage.getItem(
             `lastTaskExecution_${task.id}`,
           );
@@ -4668,7 +4696,7 @@ const scheduleTaskExecution = () => {
   // Log the start of the scheduler
   addLog({
     time: new Date().toLocaleTimeString(),
-    message: "=== 定时任务调度服务已启动 ===",
+    message: `=== 定时任务调度服务已启动（页面时间 ${new Date().toLocaleString("zh-CN", { hour12: false })}，时区 ${Intl.DateTimeFormat().resolvedOptions().timeZone}） ===`,
     type: "info",
   });
 
