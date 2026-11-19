@@ -4493,6 +4493,9 @@ watch(
 // Task scheduler variables - moved to component level scope
 const intervalId = ref(null);
 let lastTaskExecution = null;
+// 最近一次"有活动"（打日志）的时间：长任务（比如爬怪异塔要跑几十分钟）一直在打日志，
+// 用它判断卡死才准；只看计划任务时间会把正常的长任务当成卡死，把 isRunning 强行置回 false。
+let lastActivityAt = Date.now();
 let healthCheckInterval = null;
 const pageLoadTime = Date.now();
 
@@ -4506,13 +4509,13 @@ const healthCheck = () => {
     startScheduler();
   }
 
-  // Add a safety mechanism to prevent isRunning from being stuck
+  // Add a safety mechanism to prevent isRunning from being stuck.
+  // 只有"连续 10 分钟一点日志都没有"才认为卡死；长任务会一直打日志，不能被误判。
   if (isRunning.value) {
-    const now = Date.now();
-    const tenMinutesAgo = now - 10 * 60 * 1000; // 10 minutes ago
-    if (lastTaskExecution && lastTaskExecution < tenMinutesAgo) {
+    const tenMinutesIdle = Date.now() - 10 * 60 * 1000;
+    if (lastActivityAt < tenMinutesIdle) {
       console.error(
-        `[${new Date().toISOString()}] isRunning has been true for more than 10 minutes, resetting to false`,
+        `[${new Date().toISOString()}] isRunning has been true with no activity for more than 10 minutes, resetting to false`,
       );
       isRunning.value = false;
       addLog({
@@ -5682,6 +5685,13 @@ const saveTaskTemplate = () => {
 const currentRunningTokenId = ref(null);
 const currentProgress = ref(0);
 const logs = ref([]);
+// 每打一条日志就刷新 lastActivityAt，healthCheck 用它判断任务是否真的卡死
+watch(
+  () => logs.value[logs.value.length - 1],
+  (entry) => {
+    if (entry) lastActivityAt = Date.now();
+  },
+);
 const logContainer = ref(null);
 const autoScrollLog = ref(true);
 const filterErrorsOnly = ref(false);
