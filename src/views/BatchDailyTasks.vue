@@ -4623,9 +4623,12 @@ const startScheduler = () => {
               taskExecutionKey,
             );
 
+            // 记一笔"今天跑过了"，供补跑逻辑判断
+            localStorage.setItem(`lastRunDay_${task.id}`, dayKeyOf(matchedAt));
+
             // Execute the task
             lastTaskExecution = Date.now();
-            executeScheduledTask(task);
+            enqueueScheduledTask(task);
           } else {
             // Only log once per minute to avoid spamming logs
             // But since we check every 10s, this might log multiple times if we don't track logged state
@@ -4694,6 +4697,73 @@ onBeforeUnmount(() => {
   }
 });
 
+// 同一分钟可能有多个定时任务同时到点（例如 00:30 的爬塔/功法/加钟）。
+// 后到的任务会因为 isRunning 已被占用而在任务函数内部静默 return，所以这里排队串行执行。
+const scheduledRunQueue = [];
+let scheduledRunBusy = false;
+
+const drainScheduledTaskQueue = async () => {
+  if (scheduledRunBusy) return;
+  scheduledRunBusy = true;
+  try {
+    while (scheduledRunQueue.length > 0) {
+      const next = scheduledRunQueue.shift();
+      try {
+        await executeScheduledTask(next);
+      } catch (error) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 定时任务 ${next.name} 执行异常: ${error.message || error} ===`,
+          type: "error",
+        });
+      }
+    }
+  } finally {
+    scheduledRunBusy = false;
+  }
+};
+
+const enqueueScheduledTask = (task) => {
+  scheduledRunQueue.push(task);
+  if (scheduledRunBusy || scheduledRunQueue.length > 1) {
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `=== 定时任务 ${task.name} 进入排队（前面还有 ${scheduledRunQueue.length - 1} 个） ===`,
+      type: "info",
+    });
+  }
+  void drainScheduledTaskQueue();
+};
+
+const dayKeyOf = (date) =>
+  `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+
+/**
+ * 补跑当天错过的「每天固定时间」任务：每个任务每天最多补一次。
+ * 调度器只在批量任务页开着时运行，页面晚开或中途刷新就会漏掉，这里补回来。
+ */
+const catchUpMissedDailyTasks = () => {
+  const now = new Date();
+  const today = dayKeyOf(now);
+  scheduledTasks.value
+    .filter((task) => task.enabled && task.runType === "daily" && task.runTime)
+    .forEach((task) => {
+      const [hour, minute] = String(task.runTime).split(":").map(Number);
+      if (!Number.isFinite(hour) || !Number.isFinite(minute)) return;
+      const scheduled = new Date(now);
+      scheduled.setHours(hour, minute, 0, 0);
+      if (scheduled > now) return; // 今天还没到点
+      if (localStorage.getItem(`lastRunDay_${task.id}`) === today) return;
+      localStorage.setItem(`lastRunDay_${task.id}`, today);
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `=== 补跑今天错过的定时任务: ${task.name}（计划 ${task.runTime}） ===`,
+        type: "warning",
+      });
+      enqueueScheduledTask(task);
+    });
+};
+
 // Task scheduler - ensure it runs properly
 const scheduleTaskExecution = () => {
   // Log the start of the scheduler
@@ -4714,6 +4784,9 @@ const scheduleTaskExecution = () => {
 
   // Initial health check
   healthCheck();
+
+  // 页面刚打开：把今天错过的那次「每天固定时间」任务补上
+  catchUpMissedDailyTasks();
 };
 
 /** Resolve a configured task without evaluating user-controlled source code.
