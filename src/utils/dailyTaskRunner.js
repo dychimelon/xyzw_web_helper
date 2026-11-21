@@ -279,6 +279,57 @@ export class DailyTaskRunner {
   }
 
   /**
+   * 官方配置不可用时的降级路径：不判断任务，只按服务器返回的奖励状态补领积分奖励。
+   * 奖励 id 直接取自服务器的 dailyReward / weekReward 键，因此不需要配置表。
+   * @param {string} tokenId Account identity.
+   * @returns {Promise<object>} Summary compatible with the normal runner.
+   */
+  async runDegradedClaims(tokenId) {
+    const role = await this.refreshServerRole(tokenId);
+    const dailyTask = role?.dailyTask || {};
+    const summary = {
+      completed: 0,
+      skipped: 0,
+      failed: 0,
+      deferred: 0,
+      remainingTasks: 0,
+      unclaimedTasks: 0,
+      remainingRewards: 0,
+      incomplete: 0,
+      degraded: true,
+    };
+    const claimAll = async (claimedMap, command, label) => {
+      if (!claimedMap || typeof claimedMap !== "object") return;
+      for (const [rawId, claimed] of Object.entries(claimedMap)) {
+        if (claimed === true) continue;
+        const rewardId = Number(rawId);
+        if (!Number.isFinite(rewardId)) continue;
+        this.throwIfInterrupted(tokenId);
+        try {
+          await this.executeGameCommand(
+            tokenId,
+            command,
+            { rewardId },
+            `${label}${rewardId}`,
+          );
+          summary.completed++;
+        } catch (error) {
+          if (error.interrupted) throw error;
+          summary.skipped++;
+          this.log(`跳过${label}${rewardId}: ${error.message}`, "warning");
+        }
+      }
+    };
+    await claimAll(dailyTask.dailyReward, "task_claimdailyreward", "日常积分奖励");
+    await claimAll(dailyTask.weekReward, "task_claimweekreward", "周常积分奖励");
+    this.log(
+      `只领奖模式结束：领取 ${summary.completed} 项，跳过 ${summary.skipped} 项（具体任务请手动补）`,
+      "success",
+    );
+    return summary;
+  }
+
+  /**
    * Fill remaining server task counters and claim only eligible unclaimed rewards.
    * @param {string} tokenId Account identity.
    * @param {object} callbacks Log, progress and cancellation hooks.
@@ -304,15 +355,25 @@ export class DailyTaskRunner {
     const settings = customSettings || this.loadSettings(tokenId);
     if (!settings) throw new Error("每日任务设置无法读取");
     this.log("读取服务器任务配置与当前任务列表...");
-    this.taskConfig = await this.loadConfig(
-      {
-        sendMessageWithPromise: (id, cmd, params, timeout) =>
-          this.sendRequest(id, () =>
-            this.tokenStore.sendMessageWithPromise(id, cmd, params, timeout),
-          ),
-      },
-      tokenId,
-    );
+    try {
+      this.taskConfig = await this.loadConfig(
+        {
+          sendMessageWithPromise: (id, cmd, params, timeout) =>
+            this.sendRequest(id, () =>
+              this.tokenStore.sendMessageWithPromise(id, cmd, params, timeout),
+            ),
+        },
+        tokenId,
+      );
+    } catch (configError) {
+      // 官方配置拉不到（如 CDN 404）时降级：不做任务，只按服务器状态补领积分奖励。
+      // 领取接口只要 rewardId，够不够分/领没领过由服务器判断，所以不需要配置表。
+      this.log(
+        `官方任务配置不可用（${configError.message}），进入只领奖模式`,
+        "warning",
+      );
+      return this.runDegradedClaims(tokenId);
+    }
     const roleData = await this.refreshServerRole(tokenId);
     this.taskDay = roleData.dailyTask.dailyTime;
 
