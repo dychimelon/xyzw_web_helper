@@ -3105,6 +3105,7 @@ import {
   normalizeBlackMarketPurchaseList,
 } from "@/utils/batch/blackMarketConfig";
 import { DailyTaskRunner } from "@/utils/dailyTaskRunner";
+import { describeError } from "@/utils/dailyTaskState";
 import { goldItemsConfig, merchantConfig } from "@/utils/dreamConstants";
 
 import { isSameGameValue } from "@/utils/gameValue.js";
@@ -6428,7 +6429,7 @@ const startBatch = async () => {
       tokenStatus.value[tokenId] = error.interrupted ? "stopped" : "failed";
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `${token.name}: ${error.message}`,
+        message: `${token.name}: ${describeError(error)}`,
         type: error.interrupted ? "warning" : "error",
       });
     } finally {

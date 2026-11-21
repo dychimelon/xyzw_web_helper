@@ -372,6 +372,8 @@ export class DailyTaskRunner {
         `官方任务配置不可用（${configError.message}），进入只领奖模式`,
         "warning",
       );
+      // 给配置占位，refreshServerRole 里会读 config.tasks
+      this.taskConfig = { tasks: [], dailyRewards: [], weeklyRewards: [] };
       return this.runDegradedClaims(tokenId);
     }
     const roleData = await this.refreshServerRole(tokenId);

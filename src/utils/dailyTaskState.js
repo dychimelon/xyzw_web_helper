@@ -288,7 +288,9 @@ export function getDailyTaskStates(role, config) {
     Array.isArray(daily.complete)
   )
     throw new Error("服务器任务列表不完整，不能判断完成状态");
-  return config.tasks.map((task) => {
+  const tasks = Array.isArray(config?.tasks) ? config.tasks : [];
+  if (tasks.length === 0) return [];
+  return tasks.map((task) => {
     const value = Object.hasOwn(daily.complete, task.completeCondition)
       ? daily.complete[task.completeCondition]
       : 0;
@@ -332,4 +334,29 @@ export function getClaimablePointRewards(daily, definitions, weekly = false) {
   return definitions
     .filter((reward) => points >= reward.limit && claimed[reward.id] !== true)
     .map((reward) => reward.id);
+}
+
+/**
+ * 把浏览器/网络的原生英文报错翻成能看懂的话。
+ * @param {unknown} error 捕获到的异常。
+ * @returns {string} 中文提示；无法识别时原样返回。
+ */
+export function describeError(error) {
+  const raw = error?.message || String(error ?? "未知错误");
+  const propertyRead = raw.match(
+    /Cannot read propert(?:y|ies) of (?:undefined|null) \(reading '([^']+)'\)/,
+  );
+  if (propertyRead) {
+    return `程序内部缺少「${propertyRead[1]}」数据（多半是官方任务配置没加载成功）`;
+  }
+  if (/Failed to fetch|NetworkError|Load failed|ERR_NETWORK/i.test(raw)) {
+    return "网络请求失败，请检查容器能否访问外网";
+  }
+  if (/timeout|timed out|TimeoutError/i.test(raw)) {
+    return "请求超时，服务器没有响应";
+  }
+  if (/is not a function/i.test(raw)) {
+    return "程序内部调用出错（函数不存在），请查看完整日志";
+  }
+  return raw;
 }
