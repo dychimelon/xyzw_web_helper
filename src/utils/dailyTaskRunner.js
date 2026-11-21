@@ -300,11 +300,17 @@ export class DailyTaskRunner {
       incomplete: 0,
       degraded: true,
     };
-    const claimAll = async (claimedMap, command, label) => {
+    // 真实档位：日常 20/40/60/80/100，周常 100/200/300/400/500，id 依次为 1~5
+    const DAILY_TIERS = [20, 40, 60, 80, 100];
+    const WEEKLY_TIERS = [100, 200, 300, 400, 500];
+    const claimTiers = async (claimedMap, points, tiers, command, label) => {
       const claimed =
         claimedMap && typeof claimedMap === "object" ? claimedMap : {};
-      // 服务器只返回"领过哪些"，没领的不在表里，所以按 1~10 逐个试，失败跳过
-      for (let rewardId = 1; rewardId <= 10; rewardId++) {
+      const current = Number.isFinite(points) ? points : 0;
+      for (let index = 0; index < tiers.length; index++) {
+        const rewardId = index + 1;
+        // 分数不够这一档，后面的档位更不够，直接结束（避免刷一堆无效请求）
+        if (current < tiers[index]) break;
         if (claimed[rewardId] === true) continue;
         this.throwIfInterrupted(tokenId);
         try {
@@ -322,8 +328,20 @@ export class DailyTaskRunner {
         }
       }
     };
-    await claimAll(dailyTask.dailyReward, "task_claimdailyreward", "日常积分奖励");
-    await claimAll(dailyTask.weekReward, "task_claimweekreward", "周常积分奖励");
+    await claimTiers(
+      dailyTask.dailyReward,
+      dailyTask.dailyPoint,
+      DAILY_TIERS,
+      "task_claimdailyreward",
+      "日常积分奖励",
+    );
+    await claimTiers(
+      dailyTask.weekReward,
+      dailyTask.weekPoint,
+      WEEKLY_TIERS,
+      "task_claimweekreward",
+      "周常积分奖励",
+    );
     this.log(
       `只领奖模式结束：领取 ${summary.completed} 项，跳过 ${summary.skipped} 项（具体任务请手动补）`,
       "success",
