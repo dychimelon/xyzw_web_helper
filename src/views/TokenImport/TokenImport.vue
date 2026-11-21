@@ -997,6 +997,7 @@ const editRules = {
 
 const bulkOptions = [
   { label: "刷新所有Token", key: "refreshAll" },
+  { label: "重新获取所有Token", key: "reFetchAll" },
   { label: "更新token信息", key: "updateInfo" },
   { label: "导出所有Token", key: "export" },
   { label: "导入Token文件", key: "import" },
@@ -1477,6 +1478,44 @@ const deleteToken = (token) => {
 };
 
 // 批量刷新所有URLToken
+/**
+ * 批量"重新获取"：和单个账号三点菜单里的"重新获取"同一套逻辑，逐个跑。
+ * 手动导入的账号也包含在内（refreshAllTokens 会跳过它们）。
+ */
+const reFetchAllTokens = () => {
+  const list = [...tokenStore.gameTokens];
+  if (list.length === 0) {
+    message.warning("没有可重新获取的Token");
+    return;
+  }
+  dialog.warning({
+    title: "重新获取所有Token",
+    content: `将逐个重新获取 ${list.length} 个账号的Token，耗时较长，期间请勿关闭页面。确定继续吗？`,
+    positiveText: "开始",
+    negativeText: "取消",
+    onPositiveClick: async () => {
+      let ok = 0;
+      let failed = 0;
+      const loading = message.loading(`正在重新获取 (0/${list.length})`, {
+        duration: 0,
+      });
+      for (let i = 0; i < list.length; i++) {
+        try {
+          await refreshToken(list[i]);
+          ok += 1;
+        } catch (error) {
+          failed += 1;
+        }
+        loading.content = `正在重新获取 (${i + 1}/${list.length})`;
+        // 稍作间隔，避免把服务器打急
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+      loading.destroy();
+      message.success(`重新获取完成：成功 ${ok} 个，失败 ${failed} 个`);
+    },
+  });
+};
+
 const refreshAllTokens = async () => {
   if (!tokenStore.gameTokens.length) {
     message.warning("没有可刷新的Token");
@@ -1565,6 +1604,9 @@ const handleBulkAction = (key) => {
   switch (key) {
     case "refreshAll":
       refreshAllTokens();
+      break;
+    case "reFetchAll":
+      reFetchAllTokens();
       break;
     case "updateInfo":
       updateAllTokenInfo();

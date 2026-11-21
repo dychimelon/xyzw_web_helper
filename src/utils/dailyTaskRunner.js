@@ -252,11 +252,13 @@ export class DailyTaskRunner {
           state.status === "pending" ? "info" : "success",
         );
       }
-      const progress = Math.floor(
-        (states.filter((state) => state.status === "claimed").length /
-          states.length) *
-          100,
-      );
+      const progress = states.length
+        ? Math.floor(
+            (states.filter((state) => state.status === "claimed").length /
+              states.length) *
+              100,
+          )
+        : 0;
       if (progress !== this.reportedProgress) {
         this.reportedProgress = progress;
         this.callbacks?.onProgress?.(progress);
@@ -299,11 +301,11 @@ export class DailyTaskRunner {
       degraded: true,
     };
     const claimAll = async (claimedMap, command, label) => {
-      if (!claimedMap || typeof claimedMap !== "object") return;
-      for (const [rawId, claimed] of Object.entries(claimedMap)) {
-        if (claimed === true) continue;
-        const rewardId = Number(rawId);
-        if (!Number.isFinite(rewardId)) continue;
+      const claimed =
+        claimedMap && typeof claimedMap === "object" ? claimedMap : {};
+      // 服务器只返回"领过哪些"，没领的不在表里，所以按 1~10 逐个试，失败跳过
+      for (let rewardId = 1; rewardId <= 10; rewardId++) {
+        if (claimed[rewardId] === true) continue;
         this.throwIfInterrupted(tokenId);
         try {
           await this.executeGameCommand(
