@@ -886,6 +886,8 @@ export class DailyTaskRunner {
     const totalTasks = taskList.length;
     this.log(`共有 ${totalTasks} 个步骤；每日任务按本轮服务器详情补差`);
     let claimsStarted = false;
+    // 连续失败计数：单步失败跳过继续跑，连续 3 步失败才认为连接/账号真有问题
+    let consecutiveFailures = 0;
     try {
       for (let i = 0; i < taskList.length; i++) {
         this.throwIfInterrupted(tokenId);
@@ -922,6 +924,7 @@ export class DailyTaskRunner {
             summary.deferred++;
             supplementalIncomplete++;
           } else summary.completed++;
+          consecutiveFailures = 0;
           this.log(
             `${task.name}: ${result === false && !task.checkOnly ? "待继续" : task.condition !== undefined || task.claimCondition !== undefined ? "已执行，等待集中核对服务器状态" : "已处理"}`,
             "info",
@@ -930,17 +933,24 @@ export class DailyTaskRunner {
         } catch (error) {
           if (error.interrupted) throw error;
           summary.failed++;
+          consecutiveFailures++;
           if (this.activeCondition === undefined) supplementalIncomplete++;
           this.log(`任务执行失败: ${task.name} - ${error.message}`, "error");
-          // Match the original runner: a business rejection fails this step only.
-          if (
-            !error.serverStateUnavailable &&
-            /服务器错误:\s*\d+/.test(error.message || "") &&
-            !/\b(?:200400|12400000)\b/.test(error.message || "")
-          ) {
+          // 领取奖励的步骤都排在最后：一步失败就整轮 throw 会把奖励全丢掉。
+          // 所以单步失败只跳过这一步，连续 3 步都失败才中止。
+          if (error.serverStateUnavailable) {
+            this.log("服务器状态不可用，中止本轮并等待重新读取", "error");
+            throw error;
+          }
+          if (consecutiveFailures < 3) {
+            this.log(
+              `跳过该步，继续后续步骤（连续失败 ${consecutiveFailures}/3）`,
+              "warning",
+            );
             this.throwIfInterrupted(tokenId);
             continue;
           }
+          this.log(`连续 ${consecutiveFailures} 步失败，中止本轮日常任务`, "error");
           throw error;
         } finally {
           this.activeCondition = undefined;

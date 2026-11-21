@@ -150,6 +150,36 @@ export async function fillHangUpTime({
 }
 
 /**
+ * 拉取官方任务配置：CDN 偶发抖动/限速很常见，重试 3 次再放弃。
+ * 404 说明版本路径本身不存在，重试没意义；错误信息带上状态码和网址方便排查。
+ * @param {Function} fetchConfig - fetch 实现（浏览器里是 window.fetch）。
+ * @param {string} url - 官方配置地址。
+ * @param {number} [attempts] - 最多尝试次数。
+ * @returns {Promise<Response>} 成功的响应对象。
+ */
+async function fetchConfigWithRetry(fetchConfig, url, attempts = 3) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const response = await fetchConfig(url, {
+        signal: AbortSignal.timeout(30000),
+      });
+      if (response.ok) return response;
+      lastError = new Error(
+        `官方任务配置读取失败（HTTP ${response.status}，第 ${attempt} 次）`,
+      );
+      if (response.status === 404) break;
+    } catch (error) {
+      lastError = error;
+    }
+    if (attempt < attempts) {
+      await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
+    }
+  }
+  throw lastError;
+}
+
+/**
  * Load task targets from the official data version returned by the game server.
  * Only immutable configuration is cached; role progress is never cached here.
  * @param {object} tokenStore Live command transport.
@@ -173,11 +203,8 @@ export async function loadDailyTaskConfig(
     throw new Error("服务器未提供有效的任务配置版本");
   if (!configsByVersion.has(version)) {
     const loading = (async () => {
-      const response = await fetchConfig(
-        `https://xxz-xyzw-res.hortorgames.com/data/${version}/config.json`,
-        { signal: AbortSignal.timeout(30000) },
-      );
-      if (!response.ok) throw new Error("官方任务配置读取失败");
+      const url = `https://xxz-xyzw-res.hortorgames.com/data/${version}/config.json`;
+      const response = await fetchConfigWithRetry(fetchConfig, url);
       const config = await response.json();
       return validateDailyTaskConfig(config);
     })();
