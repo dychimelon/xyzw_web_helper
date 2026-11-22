@@ -1,6 +1,10 @@
 const configsByVersion = new Map();
 const activeTokenRuns = new Set();
 
+// 官方配置 CDN。data/<版本>/config.json 里的版本号来自 data/version.json，
+// 不是 WS 返回的 dataBundleVer——那是 Cocos bundle 哈希，直接拼路径会 404。
+const officialConfigBase = "https://xxz-xyzw-res.hortorgames.com";
+
 // The official HangUpInviteDialog exposes four help slots, independently of daily tasks.
 const HANG_UP_HELP_SLOTS = 4;
 
@@ -168,6 +172,8 @@ async function fetchConfigWithRetry(fetchConfig, url, attempts = 3) {
       lastError = new Error(
         `官方任务配置读取失败（HTTP ${response.status}，第 ${attempt} 次）`,
       );
+      lastError.status = response.status;
+      lastError.url = url;
       if (response.status === 404) break;
     } catch (error) {
       lastError = error;
@@ -177,6 +183,32 @@ async function fetchConfigWithRetry(fetchConfig, url, attempts = 3) {
     }
   }
   throw lastError;
+}
+
+/**
+ * 读官方 data/version.json 里当前真正生效的配置版本。
+ * WS 返回的 dataBundleVer 是 Cocos bundle 哈希，只能当缓存键，
+ * 真正取 config.json 时以 version.json 为准。
+ * @param {Function} fetchConfig - fetch 实现（浏览器里是 window.fetch）。
+ * @returns {Promise<string>} 当前有效的配置版本号。
+ * @throws {Error} 版本文件读取失败或格式无效。
+ */
+async function fetchLatestOfficialTaskConfigVersion(fetchConfig) {
+  const response = await fetchConfigWithRetry(
+    fetchConfig,
+    `${officialConfigBase}/data/version.json`,
+    2,
+  );
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error("官方配置版本文件不是有效 JSON");
+  }
+  const version = payload?.version;
+  if (typeof version !== "string" || !/^[\w-]+$/.test(version))
+    throw new Error("官方配置版本文件里没有有效版本号");
+  return version;
 }
 
 /**
@@ -203,10 +235,29 @@ export async function loadDailyTaskConfig(
     throw new Error("服务器未提供有效的任务配置版本");
   if (!configsByVersion.has(version)) {
     const loading = (async () => {
-      const url = `https://xxz-xyzw-res.hortorgames.com/data/${version}/config.json`;
-      const response = await fetchConfigWithRetry(fetchConfig, url);
-      const config = await response.json();
-      return validateDailyTaskConfig(config);
+      const readConfig = async (targetVersion) => {
+        const url = `${officialConfigBase}/data/${targetVersion}/config.json`;
+        const configResponse = await fetchConfigWithRetry(fetchConfig, url);
+        return validateDailyTaskConfig(await configResponse.json());
+      };
+      try {
+        return await readConfig(version);
+      } catch (error) {
+        // 只有「这个版本的目录确实不存在」才换版本重试；
+        // 网络抖动、5xx、配置格式错都不该被掩盖成版本问题。
+        if (error?.status !== 404) throw error;
+        const latestVersion =
+          await fetchLatestOfficialTaskConfigVersion(fetchConfig);
+        if (latestVersion === version) throw error;
+        const config = await readConfig(latestVersion);
+        // 记下这次回退，界面/日志可以提示版本已自动切换
+        config.requestedVersion = version;
+        config.usedVersion = latestVersion;
+        console.warn(
+          `[日常任务] 服务器给的配置版本 ${version} 已不存在，已自动改用官方最新版本 ${latestVersion}`,
+        );
+        return config;
+      }
     })();
     configsByVersion.set(version, loading);
     loading.catch(() => {

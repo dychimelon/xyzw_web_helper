@@ -164,6 +164,52 @@ test("failed config reads can be retried and unsafe versions are rejected", asyn
   );
 });
 
+test("missing server config version falls back to the official latest version", async () => {
+  const requestedUrls = [];
+  const store = {
+    async sendMessageWithPromise() {
+      return { dataBundleVer: "missing-bundle-hash" };
+    },
+  };
+  const fetchConfig = async (url) => {
+    requestedUrls.push(url);
+    if (url.includes("missing-bundle-hash")) return { ok: false, status: 404 };
+    if (url.endsWith("/data/version.json"))
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ version: "current-data-version" }),
+      };
+    return { ok: true, status: 200, json: async () => officialConfig() };
+  };
+  const config = await loadDailyTaskConfig(store, "a", fetchConfig);
+  assert.equal(config.tasks.length, 3);
+  assert.equal(config.requestedVersion, "missing-bundle-hash");
+  assert.equal(config.usedVersion, "current-data-version");
+  assert.deepEqual(requestedUrls, [
+    "https://xxz-xyzw-res.hortorgames.com/data/missing-bundle-hash/config.json",
+    "https://xxz-xyzw-res.hortorgames.com/data/version.json",
+    "https://xxz-xyzw-res.hortorgames.com/data/current-data-version/config.json",
+  ]);
+});
+
+test("non-404 config failures never switch to another version", async () => {
+  const requestedUrls = [];
+  const store = {
+    async sendMessageWithPromise() {
+      return { dataBundleVer: "server-error-version" };
+    },
+  };
+  const fetchConfig = async (url) => {
+    requestedUrls.push(url);
+    return { ok: false, status: 500 };
+  };
+  await assert.rejects(loadDailyTaskConfig(store, "a", fetchConfig), /读取失败/);
+  assert.deepEqual(requestedUrls, [
+    "https://xxz-xyzw-res.hortorgames.com/data/server-error-version/config.json",
+  ]);
+});
+
 test("duplicate point-reward IDs are rejected before duplicate claims can be scheduled", () => {
   for (const name of ["DayLimitConf", "WeekLimitConf"]) {
     const config = officialConfig();
