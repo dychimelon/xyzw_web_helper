@@ -338,11 +338,19 @@ export function registerDefaultCommands(reg) {
 
     // 梦魇相关
     .register("nightmare_getroleinfo")
+    // 十殿周奖励：领铃铛 / roll 转盘 / 领取额外次数
+    .register("nightmare_claimweekreward")
+    .register("nightmare_clickturntable")
+    .register("nightmare_claimturnrewardtimes")
     .register("dungeon_selecthero")
     .register("bosstower_gethelprank")
     .register("dungeon_buymerchant")
     // 活动/任务
     .register("activity_get")
+    // 赛事（PK 房间）：预约请求体为空，服务端按当前赛事处理
+    .register("pkroom_getfightroominfo")
+    .register("pkroom_getfightroomdetail", { roomId: "" })
+    .register("pkroom_appoint")
     .register("activity_recyclewarorderrewardclaim")
     // 玄武赐福活动
     .register("activity_warorderget")
@@ -427,12 +435,14 @@ export function registerDefaultCommands(reg) {
 
     // 逐鹿盐山竞猜
     .register("apex_getroleinfo")
+    .register("apex_taskclaim", { confId: 0 })
     .register("apex_getguesslist", { scheduleId: 0, idx: 0 })
     .register("apex_guess", { teamId: "" })
     .register("apex_get64oppomap", { scheduleId: 0, groupId: 0 })
     // —— APEX 逐鹿盐山：按需注册，仅登记组件实际调用的命令 ——
-    .register("apex_getvotelist")
-    .register("apex_vote", { round: 0, teamId: "" });
+    // 助威：groupId=第几组，round=赛期，voteCnt=投入票数
+    .register("apex_getvotelist", { groupId: 0, idx: 0, round: 0 })
+    .register("apex_vote", { round: 0, teamId: "", voteCnt: 0 });
   registry.commands.set(
     "fight_startareaarena",
     (ack = 0, seq = 0, params = {}) => {
@@ -1203,12 +1213,20 @@ export class XyzwWebSocketClient {
       legion_getarearankresp: "legion_getarearank",
       legionwar_getgoldmonthwarrankresp: "legionwar_getgoldmonthwarrank",
       nightmare_getroleinforesp: "nightmare_getroleinfo",
+      nightmare_claimweekrewardresp: "nightmare_claimweekreward",
+      nightmare_clickturntableresp: "nightmare_clickturntable",
+      // 领额外次数的回执复用 clickturntableresp
+      nightmare_claimturnrewardtimesresp: "nightmare_claimturnrewardtimes",
       fight_startlevelresp: "fight_startlevel",
       fight_calcleveltimeresp: "fight_calcleveltime",
       fight_levelresp: "fight_level",
       studyresp: "study_startgame",
       role_getroleinforesp: "role_getroleinfo",
       apex_getroleinforesp: "apex_getroleinfo",
+      apex_taskclaimresp: "apex_taskclaim",
+      pkroom_getfightroominforesp: "pkroom_getfightroominfo",
+      pkroom_getfightroomdetailresp: "pkroom_getfightroomdetail",
+      pkroom_appointresp: "pkroom_appoint",
       apex_getguesslistresp: "apex_getguesslist",
       apex_guessresp: "apex_guess",
       apex_get64oppomapresp: "apex_get64oppomap",
