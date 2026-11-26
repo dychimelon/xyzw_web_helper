@@ -104,14 +104,22 @@ export function createTasksPkRoom(deps) {
             }
             check();
 
-            if (room?.roomId) {
-              const startTime = Number(room.startTime)
-                ? new Date(Number(room.startTime) * 1000).toLocaleString()
-                : "未知";
+            if (!room?.roomId) {
+              // 查不到房间就别再发预约了：实测服务端只会回 7300234 这种没有意义的业务错误
+              tokenStatus.value[tokenId] = "completed";
               log(
-                `当前赛事：${room.roomName || room.roomId}｜开赛 ${startTime}｜已报名 ${room.curRoleNum ?? "?"}`,
+                "当前没有可预约的赛事（查不到赛事房间），已跳过预约",
+                "warning",
               );
+              return;
             }
+
+            const startTime = Number(room.startTime)
+              ? new Date(Number(room.startTime) * 1000).toLocaleString()
+              : "未知";
+            log(
+              `当前赛事：${room.roomName || room.roomId}｜开赛 ${startTime}｜已报名 ${room.curRoleNum ?? "?"}`,
+            );
 
             // 2) 预约（无参数，服务端按当前赛事处理）
             try {
@@ -133,6 +141,15 @@ export function createTasksPkRoom(deps) {
                 log(
                   `预约成功（${text.replace(/^服务器错误:\s*\d+\s*-\s*/, "")}）`,
                   "success",
+                );
+              } else if (/7300234/.test(text)) {
+                // 官方错误表里没有这个码（配置数据包版本 da6870e190），
+                // 实测多出现在「当前没有可预约的场次 / 不在预约窗口」。
+                // 不当成失败，但把原始码打出来，方便和游戏内提示对照。
+                tokenStatus.value[tokenId] = "completed";
+                log(
+                  `预约被拒绝（${text.replace(/^服务器错误:\s*/, "")}）：当前没有可预约的场次或不在预约时间`,
+                  "warning",
                 );
               } else {
                 throw error;
