@@ -140,10 +140,20 @@ test("failed config reads can be retried and unsafe versions are rejected", asyn
       return { dataBundleVer: "test-config-retry" };
     },
   };
-  const fetchConfig = async () => ({
-    ok: ++attempt > 1,
-    json: async () => officialConfig(),
-  });
+  const fetchConfig = async (url) => {
+    // 404 后的版本回退会先读 version.json：返回同一版本，让原始失败原样抛出
+    if (url.endsWith("/data/version.json"))
+      return {
+        ok: true,
+        json: async () => ({ version: "test-config-retry" }),
+      };
+    return {
+      ok: ++attempt > 1,
+      // 404 不重试，所以第一次调用就是硬失败；重试由第二次 loadDailyTaskConfig 触发
+      status: 404,
+      json: async () => officialConfig(),
+    };
+  };
   await assert.rejects(
     loadDailyTaskConfig(store, "a", fetchConfig),
     /读取失败/,
@@ -205,9 +215,12 @@ test("non-404 config failures never switch to another version", async () => {
     return { ok: false, status: 500 };
   };
   await assert.rejects(loadDailyTaskConfig(store, "a", fetchConfig), /读取失败/);
-  assert.deepEqual(requestedUrls, [
-    "https://xxz-xyzw-res.hortorgames.com/data/server-error-version/config.json",
-  ]);
+  // 5xx 会重试 3 次（每次都是同一个地址），但绝不会因此去读 version.json 换版本
+  assert.equal(requestedUrls.length, 3);
+  assert.ok(
+    requestedUrls.every((url) => url.includes("server-error-version")),
+    requestedUrls.join(","),
+  );
 });
 
 test("duplicate point-reward IDs are rejected before duplicate claims can be scheduled", () => {
@@ -219,7 +232,7 @@ test("duplicate point-reward IDs are rejected before duplicate claims can be sch
 });
 
 test("an evicted failed config request cannot remove a newer cached request for the same version", async () => {
-  let rejectFirst;
+  let finishFirst;
   let entered;
   const started = new Promise((resolve) => {
     entered = resolve;
@@ -229,20 +242,27 @@ test("an evicted failed config request cannot remove a newer cached request for 
     sendMessageWithPromise: async (id) => ({ dataBundleVer: id }),
   };
   const fetchConfig = async (url) => {
+    // 404 后的版本回退会读 version.json：让它返回同一版本，
+    // 这样该路径会原样抛回 404，不会掩盖真实的失败原因。
+    if (url.endsWith("/data/version.json"))
+      return {
+        ok: true,
+        json: async () => ({ version: "cache-race-a" }),
+      };
     if (url.includes("cache-race-a") && ++readsA === 1) {
       entered();
-      return new Promise((resolve, reject) => {
-        rejectFirst = reject;
+      return new Promise((resolve) => {
+        finishFirst = () => resolve({ ok: false, status: 404 });
       });
     }
     return { ok: true, json: async () => officialConfig() };
   };
   const first = loadDailyTaskConfig(store, "cache-race-a", fetchConfig);
-  const rejected = assert.rejects(first, /first request failed/);
+  const rejected = assert.rejects(first, /读取失败/);
   await started;
   await loadDailyTaskConfig(store, "cache-race-b", fetchConfig);
   await loadDailyTaskConfig(store, "cache-race-a", fetchConfig);
-  rejectFirst(new Error("first request failed"));
+  finishFirst();
   await rejected;
   await loadDailyTaskConfig(store, "cache-race-a", fetchConfig);
   assert.equal(readsA, 2);
